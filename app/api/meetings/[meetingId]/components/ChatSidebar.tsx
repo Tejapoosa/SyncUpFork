@@ -1,8 +1,6 @@
-import { useUsage } from '@/app/contexts/UsageContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Send } from 'lucide-react'
-import React from 'react'
 
 interface Message{
     id:number
@@ -29,7 +27,6 @@ function ChatSidebar({
   onSendMessage,
   onSuggestionClick
 }: ChatSidebarProps) {
-  const { canChat } = useUsage()
   const chatSuggestions = [
     "What deadlines were discussed in this meeting?",
     "Write a follow-up email for the team",

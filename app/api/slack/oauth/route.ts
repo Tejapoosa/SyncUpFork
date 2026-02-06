@@ -1,29 +1,50 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
-import { WebClient } from '@slack/web-api'
+import { WebClient } from '@slack/web-api';
+import { logger } from "@/lib/logger";
+import { generateRequestId } from "@/lib/request-context";
 
 export async function GET(request: NextRequest) {
-    try {
-        const { searchParams } = new URL(request.url)
-        const code = searchParams.get('code')
-        const error = searchParams.get('error')
-        const state = searchParams.get('state')
+    const requestId = generateRequestId();
+    const startTime = performance.now();
 
-        const host = request.headers.get('host')
-        const isLocal = host?.includes('localhost') //maybe use NODE_ENV here?
-        const protocol = isLocal ? 'http' : 'https'
-        const baseUrl = `${protocol}://${host}`
+    try {
+        logger.info('slack_oauth_request_received', {
+            requestId,
+            endpoint: '/api/slack/oauth',
+            method: 'GET',
+        });
+
+        const { searchParams } = new URL(request.url);
+        const code = searchParams.get('code');
+        const error = searchParams.get('error');
+        const state = searchParams.get('state');
+
+        const host = request.headers.get('host');
+        const isLocal = host?.includes('localhost');
+        const protocol = isLocal ? 'http' : 'https';
+        const baseUrl = `${protocol}://${host}`;
 
         if (error) {
-            console.error('slack oauth error:', error)
-            return NextResponse.redirect(`${baseUrl}/?slack=error`)
+            logger.warn('slack_oauth_error', {
+                requestId,
+                error,
+            });
+            return NextResponse.redirect(`${baseUrl}/?slack=error`);
         }
 
         if (!code) {
-            return NextResponse.json({ error: 'no authorization code' }, { status: 400 })
+            logger.warn('slack_oauth_no_code', {
+                requestId,
+            });
+            return NextResponse.json({ error: 'no authorization code' }, { status: 400 });
         }
 
-        const redirectUri = `${baseUrl}/api/slack/oauth`
+        logger.info('slack_oauth_exchanging_code', {
+            requestId,
+        });
+
+        const redirectUri = `${baseUrl}/api/slack/oauth`;
 
         const tokenResponse = await fetch('https://slack.com/api/oauth.v2.access', {
             method: 'POST',
@@ -36,14 +57,22 @@ export async function GET(request: NextRequest) {
                 code: code,
                 redirect_uri: redirectUri
             })
-        })
+        });
 
-        const tokenData = await tokenResponse.json()
+        const tokenData = await tokenResponse.json();
 
         if (!tokenData.ok) {
-            console.error('failed to exchange oauth code:', tokenData.error)
-            return NextResponse.redirect(`${baseUrl}/?slack=error`)
+            logger.error('slack_oauth_token_exchange_failed', new Error('Token exchange failed'), {
+                requestId,
+                error: tokenData.error,
+            });
+            return NextResponse.redirect(`${baseUrl}/?slack=error`);
         }
+
+        logger.info('slack_oauth_token_received', {
+            requestId,
+            teamId: tokenData.team.id,
+        });
 
         const installation = await prisma.slackInstallation.upsert({
             where: {
@@ -65,11 +94,21 @@ export async function GET(request: NextRequest) {
                 installerName: tokenData.authed_user.name || 'Unknown',
                 active: true,
             }
-        })
+        });
+
+        logger.info('slack_oauth_installation_saved', {
+            requestId,
+            teamId: tokenData.team.id,
+        });
 
         try {
-            const slack = new WebClient(tokenData.access_token)
-            const userInfo = await slack.users.info({ user: tokenData.authed_user.id })
+            logger.info('slack_oauth_linking_user', {
+                requestId,
+                userId: tokenData.authed_user.id,
+            });
+
+            const slack = new WebClient(tokenData.access_token);
+            const userInfo = await slack.users.info({ user: tokenData.authed_user.id });
 
             if (userInfo.user?.profile?.email) {
                 await prisma.user.updateMany({
@@ -81,27 +120,47 @@ export async function GET(request: NextRequest) {
                         slackTeamId: tokenData.team.id,
                         slackConnected: true
                     }
-                })
+                });
+
+                logger.info('slack_oauth_user_linked', {
+                    requestId,
+                    email: userInfo.user.profile.email,
+                });
             }
         } catch (error) {
-            console.error('failed to link user during oauth:', error)
+            logger.error('slack_oauth_user_linking_failed', error, {
+                requestId,
+            });
         }
 
-        const returnTo = state?.startsWith('return=') ? state.split('return=')[1] : null
+        const returnTo = state?.startsWith('return=') ? state.split('return=')[1] : null;
+
+        const duration = performance.now() - startTime;
+        logger.info('slack_oauth_success', {
+            requestId,
+            teamId: tokenData.team.id,
+            returnTo: returnTo,
+            duration: Math.round(duration),
+        });
 
         if (returnTo === 'integrations') {
-            return NextResponse.redirect(`${baseUrl}/integrations?setup=slack`)
+            return NextResponse.redirect(`${baseUrl}/integrations?setup=slack`);
         } else {
-            return NextResponse.redirect(`${baseUrl}/?slack=installed`)
+            return NextResponse.redirect(`${baseUrl}/?slack=installed`);
         }
+
     } catch (error) {
-        console.error('slack oauth error', error)
+        const duration = performance.now() - startTime;
+        logger.error('slack_oauth_unexpected_error', error, {
+            requestId,
+            duration: Math.round(duration),
+        });
 
-        const host = request.headers.get('host')
-        const isLocal = host?.includes('localhost')
-        const protocol = isLocal ? 'http' : 'https'
-        const baseUrl = `${protocol}://${host}`
+        const host = request.headers.get('host');
+        const isLocal = host?.includes('localhost');
+        const protocol = isLocal ? 'http' : 'https';
+        const baseUrl = `${protocol}://${host}`;
 
-        return NextResponse.redirect(`${baseUrl}/?slack=error`)
+        return NextResponse.redirect(`${baseUrl}/?slack=error`);
     }
 }

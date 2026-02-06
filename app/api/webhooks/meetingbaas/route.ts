@@ -5,8 +5,9 @@ import { processTranscript } from "@/lib/rag";
 import { incrementMeetingUsage } from "@/lib/usage";
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
+import { generateRequestId } from "@/lib/request-context";
 
-// Initialize S3 client for audio uploads
 const s3Client = new S3Client({
     region: process.env.AWS_REGION!,
     credentials: {
@@ -16,11 +17,25 @@ const s3Client = new S3Client({
 });
 
 export async function POST(request: NextRequest) {
+    const requestId = generateRequestId();
+    const startTime = performance.now();
+
     try {
-        const webhook = await request.json()
+        logger.info('webhook_meetingbaas_request_received', {
+            requestId,
+            endpoint: '/api/webhooks/meetingbaas',
+            method: 'POST',
+        });
+
+        const webhook = await request.json();
 
         if (webhook.event === 'complete') {
-            const webhookData = webhook.data
+            const webhookData = webhook.data;
+
+            logger.info('webhook_meetingbaas_looking_up_meeting', {
+                requestId,
+                botId: webhookData.bot_id,
+            });
 
             const meeting = await prisma.meeting.findFirst({
                 where: {
@@ -29,42 +44,46 @@ export async function POST(request: NextRequest) {
                 include: {
                     user: true
                 }
-            })
+            });
 
             if (!meeting) {
-                console.error('❌ Meeting not found for bot_id:', webhookData.bot_id)
-                console.error('Available botIds in database:', await prisma.meeting.findMany({
-                    where: { botId: { not: null } },
-                    select: { id: true, botId: true, title: true }
-                }))
-                return NextResponse.json({ error: 'meeting not found' }, { status: 404 })
+                logger.error('webhook_meetingbaas_meeting_not_found', new Error('Meeting not found'), {
+                    requestId,
+                    botId: webhookData.bot_id,
+                });
+                return NextResponse.json({ error: 'meeting not found' }, { status: 404 });
             }
 
-            console.log('✅ Found meeting:', meeting.title, 'for bot_id:', webhookData.bot_id)
+            logger.info('webhook_meetingbaas_meeting_found', {
+                requestId,
+                meetingId: meeting.id,
+                title: meeting.title,
+            });
 
-            await incrementMeetingUsage(meeting.userId)
+            await incrementMeetingUsage(meeting.userId);
 
             if (!meeting.user.email) {
-                console.error('user email not found for this meeting', meeting.id)
-                return NextResponse.json({ error: 'user email not found' }, { status: 400 })
+                logger.error('webhook_meetingbaas_user_email_not_found', new Error('Email missing'), {
+                    requestId,
+                    meetingId: meeting.id,
+                });
+                return NextResponse.json({ error: 'user email not found' }, { status: 400 });
             }
 
-            // Upload recording to S3 if available
             let recordingUrl = webhookData.mp4 || null;
 
             if (webhookData.mp4 && process.env.S3_BUCKET_NAME) {
                 try {
-                    console.log('Uploading recording to S3:', webhookData.mp4);
+                    logger.info('webhook_meetingbaas_uploading_to_s3', {
+                        requestId,
+                        meetingId: meeting.id,
+                    });
 
-                    // Download audio from MeetingBaaS
                     const audioResponse = await fetch(webhookData.mp4);
                     if (audioResponse.ok) {
                         const audioBuffer = await audioResponse.arrayBuffer();
-
-                        // Generate S3 key for the recording
                         const s3Key = `recordings/${meeting.id}-${Date.now()}.mp4`;
 
-                        // Upload to S3
                         const uploadCommand = new PutObjectCommand({
                             Bucket: process.env.S3_BUCKET_NAME!,
                             Key: s3Key,
@@ -73,20 +92,28 @@ export async function POST(request: NextRequest) {
                         });
 
                         await s3Client.send(uploadCommand);
-
-                        // Generate public S3 URL
                         recordingUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
 
-                        console.log('Recording uploaded to S3:', recordingUrl);
+                        logger.info('webhook_meetingbaas_recording_uploaded', {
+                            requestId,
+                            meetingId: meeting.id,
+                            s3Key,
+                        });
                     }
                 } catch (s3Error) {
-                    console.error('Failed to upload recording to S3:', s3Error);
-                    // Continue with original URL if S3 upload fails
+                    logger.error('webhook_meetingbaas_s3_upload_failed', s3Error, {
+                        requestId,
+                        meetingId: meeting.id,
+                    });
                     recordingUrl = webhookData.mp4;
                 }
             }
 
-            console.log('📝 Updating meeting with completion data...')
+            logger.info('webhook_meetingbaas_updating_meeting', {
+                requestId,
+                meetingId: meeting.id,
+            });
+
             await prisma.meeting.update({
                 where: {
                     id: meeting.id
@@ -98,25 +125,35 @@ export async function POST(request: NextRequest) {
                     recordingUrl: recordingUrl,
                     speakers: webhookData.speakers || null
                 }
-            })
-            console.log('✅ Meeting marked as ended:', meeting.title)
+            });
 
             if (webhookData.transcript && !meeting.processed) {
                 try {
-                    const processed = await processMeetingTranscript(webhookData.transcript)
+                    logger.info('webhook_meetingbaas_processing_transcript', {
+                        requestId,
+                        meetingId: meeting.id,
+                    });
 
-                    let transcriptText = ''
+                    const processed = await processMeetingTranscript(webhookData.transcript);
+
+                    let transcriptText = '';
 
                     if (Array.isArray(webhookData.transcript)) {
                         transcriptText = webhookData.transcript
                             .map((item: {speaker?: string; words?: {word?: string}[]}) =>
                                 `${item.speaker || 'Speaker'}: ${item.words?.map((w: {word?: string}) => w.word).join(' ') || ''}`)
-                            .join('\n')
+                            .join('\n');
                     } else {
-                        transcriptText = webhookData.transcript
+                        transcriptText = webhookData.transcript;
                     }
 
                     try {
+                        logger.info('webhook_meetingbaas_sending_email', {
+                            requestId,
+                            meetingId: meeting.id,
+                            userEmail: meeting.user.email,
+                        });
+
                         await sendMeetingSummaryEmail({
                             userEmail: meeting.user.email,
                             userName: meeting.user.name || 'User',
@@ -125,7 +162,7 @@ export async function POST(request: NextRequest) {
                             actionItems: processed.actionItems,
                             meetingId: meeting.id,
                             meetingDate: meeting.startTime.toLocaleDateString()
-                        })
+                        });
 
                         await prisma.meeting.update({
                             where: {
@@ -135,12 +172,21 @@ export async function POST(request: NextRequest) {
                                 emailSent: true,
                                 emailSentAt: new Date()
                             }
-                        })
+                        });
+
+                        logger.info('webhook_meetingbaas_email_sent', {
+                            requestId,
+                            meetingId: meeting.id,
+                        });
+
                     } catch (emailError) {
-                        console.error('failed to send the email:', emailError)
+                        logger.error('webhook_meetingbaas_email_failed', emailError, {
+                            requestId,
+                            meetingId: meeting.id,
+                        });
                     }
 
-                    await processTranscript(meeting.id, meeting.userId, transcriptText, meeting.title)
+                    await processTranscript(meeting.id, meeting.userId, transcriptText, meeting.title);
 
                     await prisma.meeting.update({
                         where: {
@@ -154,11 +200,18 @@ export async function POST(request: NextRequest) {
                             ragProcessed: true,
                             ragProcessedAt: new Date()
                         }
-                    })
+                    });
 
+                    logger.info('webhook_meetingbaas_transcript_processed', {
+                        requestId,
+                        meetingId: meeting.id,
+                    });
 
                 } catch (processingError) {
-                    console.error('failed to process the transcript:', processingError)
+                    logger.error('webhook_meetingbaas_transcript_processing_failed', processingError, {
+                        requestId,
+                        meetingId: meeting.id,
+                    });
 
                     await prisma.meeting.update({
                         where: {
@@ -170,11 +223,19 @@ export async function POST(request: NextRequest) {
                             summary: 'processing failed. please check the transcript manually.',
                             actionItems: []
                         }
-                    })
+                    });
                 }
             }
 
-            console.log('🎉 Webhook processing completed successfully for meeting:', meeting.title)
+            const duration = performance.now() - startTime;
+            logger.info('webhook_meetingbaas_success', {
+                requestId,
+                meetingId: meeting.id,
+                duration: Math.round(duration),
+                transcriptReceived: !!webhookData.transcript,
+                recordingUploaded: recordingUrl !== webhookData.mp4,
+            });
+
             return NextResponse.json({
                 success: true,
                 message: 'meeting processed successfully',
@@ -182,14 +243,26 @@ export async function POST(request: NextRequest) {
                 meetingTitle: meeting.title,
                 transcriptReceived: !!webhookData.transcript,
                 recordingUploaded: recordingUrl !== webhookData.mp4
-            })
+            });
         }
+
+        logger.info('webhook_meetingbaas_no_action_needed', {
+            requestId,
+            event: webhook.event,
+        });
+
         return NextResponse.json({
             success: true,
-            message: 'webhook recieved but no action needed bro'
-        })
+            message: 'webhook received'
+        });
+
     } catch (error) {
-        console.error('webhook processing errir:', error)
-        return NextResponse.json({ error: 'internal server error' }, { status: 500 })
+        const duration = performance.now() - startTime;
+        logger.error('webhook_meetingbaas_unexpected_error', error, {
+            requestId,
+            duration: Math.round(duration),
+        });
+
+        return NextResponse.json({ error: 'internal server error' }, { status: 500 });
     }
 }

@@ -1,5 +1,4 @@
 import Image from "next/image";
-import React from "react";
 
 const integrations = [
   { name: "Slack", image: "slack.png" },
@@ -34,6 +33,8 @@ function IntegrationsSection() {
                   width={64}
                   height={64}
                   className="w-full h-full object-contain"
+                  loading="lazy"
+                  quality={85}
                 />
               </div>
               <p className="text-sm font-medium text-white">

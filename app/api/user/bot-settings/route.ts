@@ -1,13 +1,49 @@
 import { prisma } from "@/lib/db";
 import { currentUser } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
+import { AppError, ErrorMessages, createErrorResponse } from "@/lib/errors";
+import { generateRequestId } from "@/lib/request-context";
 
-export async function GET() {
+const botSettingsSchema = {
+  validate: (data: any) => {
+    const errors = [];
+    if (!data.botName || typeof data.botName !== 'string') errors.push('botName required');
+    return {
+      valid: errors.length === 0,
+      error: errors.join(', '),
+      data: errors.length === 0 ? data : null
+    };
+  }
+};
+
+export async function GET(request: NextRequest) {
+  const requestId = generateRequestId();
+  const startTime = performance.now();
+
   try {
+    logger.info('user_bot_settings_get_request_received', {
+      requestId,
+      endpoint: '/api/user/bot-settings',
+      method: 'GET',
+    });
+
     const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: "unautorized" }, { status: 401 });
+      logger.warn('user_bot_settings_get_unauthorized', { requestId });
+      return NextResponse.json(
+        createErrorResponse(
+          new AppError(ErrorMessages.NOT_AUTHENTICATED),
+          requestId
+        ),
+        { status: 401 }
+      );
     }
+
+    logger.info('user_bot_settings_get_lookup', {
+      requestId,
+      userId: user.id,
+    });
 
     const dbUser = await prisma.user.findUnique({
       where: {
@@ -20,28 +56,84 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json({
+    const duration = performance.now() - startTime;
+    logger.info('user_bot_settings_get_success', {
+      requestId,
+      userId: user.id,
+      duration: Math.round(duration),
+    });
+
+    const res = NextResponse.json({
       botName: dbUser?.botName || "Meeting Bot",
       botImageUrl: dbUser?.botImageUrl || null,
       plan: dbUser?.currentPlan || "free",
     });
+    res.headers.set('X-Request-Id', requestId);
+    return res;
+
   } catch (error) {
-    console.error("error fetching bot settings:", error);
-    return NextResponse.json(
-      { error: "internal server error" },
-      { status: 500 }
+    const duration = performance.now() - startTime;
+    logger.error('user_bot_settings_get_unexpected_error', error, {
+      requestId,
+      duration: Math.round(duration),
+    });
+
+    const appError = new AppError(ErrorMessages.DATABASE_ERROR);
+    const res = NextResponse.json(
+      createErrorResponse(appError, requestId),
+      { status: appError.statusCode }
     );
+    res.headers.set('X-Request-Id', requestId);
+    return res;
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const requestId = generateRequestId();
+  const startTime = performance.now();
+
   try {
+    logger.info('user_bot_settings_post_request_received', {
+      requestId,
+      endpoint: '/api/user/bot-settings',
+      method: 'POST',
+    });
+
     const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: "unautorized" }, { status: 401 });
+      logger.warn('user_bot_settings_post_unauthorized', { requestId });
+      return NextResponse.json(
+        createErrorResponse(
+          new AppError(ErrorMessages.NOT_AUTHENTICATED),
+          requestId
+        ),
+        { status: 401 }
+      );
     }
 
-    const { botName, botImageUrl } = await request.json();
+    const body = await request.json();
+    const validation = botSettingsSchema.validate(body);
+    if (!validation.valid) {
+      logger.warn('user_bot_settings_post_validation_failed', {
+        requestId,
+        error: validation.error,
+      });
+      return NextResponse.json(
+        createErrorResponse(
+          new AppError(ErrorMessages.VALIDATION_FAILED('botName')),
+          requestId
+        ),
+        { status: 400 }
+      );
+    }
+
+    const { botName, botImageUrl } = validation.data;
+
+    logger.info('user_bot_settings_post_updating', {
+      requestId,
+      userId: user.id,
+      botName,
+    });
 
     await prisma.user.update({
       where: {
@@ -52,13 +144,31 @@ export async function POST(request: Request) {
         botImageUrl: botImageUrl,
       },
     });
-    return NextResponse.json({ success: true });
+
+    const duration = performance.now() - startTime;
+    logger.info('user_bot_settings_post_success', {
+      requestId,
+      userId: user.id,
+      duration: Math.round(duration),
+    });
+
+    const res = NextResponse.json({ success: true });
+    res.headers.set('X-Request-Id', requestId);
+    return res;
+
   } catch (error) {
-    console.error("error saving bot settings:", error);
-    return NextResponse.json(
-      { error: "internal server error" },
-      { status: 500 }
+    const duration = performance.now() - startTime;
+    logger.error('user_bot_settings_post_unexpected_error', error, {
+      requestId,
+      duration: Math.round(duration),
+    });
+
+    const appError = new AppError(ErrorMessages.DATABASE_ERROR);
+    const res = NextResponse.json(
+      createErrorResponse(appError, requestId),
+      { status: appError.statusCode }
     );
+    res.headers.set('X-Request-Id', requestId);
+    return res;
   }
 }
-

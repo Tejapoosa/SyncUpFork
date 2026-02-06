@@ -1,22 +1,36 @@
-// Ollama Local AI Implementation
+// Ollama Local AI Implementation - Performance Optimized
 // Completely free, private, and runs locally
 // Requires Ollama to be installed and running
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
-const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || 'nomic-embed-text'
-const CHAT_MODELS = (process.env.OLLAMA_CHAT_MODEL || 'llama2,mistral,codellama,vicuna').split(',').map(m => m.trim())
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || 'nomic-embed-text';
+const CHAT_MODELS = (process.env.OLLAMA_CHAT_MODEL || 'llama2,mistral,codellama,vicuna').split(',').map(m => m.trim());
+
+// Performance: Add request timeout
+const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '30000', 10); // 30 seconds default
 
 interface OllamaEmbeddingResponse {
-    embedding: number[]
+    embedding: number[];
 }
 
 interface OllamaChatResponse {
-    response: string
-    done: boolean
+    response: string;
+    done: boolean;
 }
 
-async function queryOllama(model: string, payload: any): Promise<any> {
+// Performance: AbortController for timeout support
+function createTimeoutController(timeout: number): AbortController {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    if (typeof timeoutId === 'object' && 'unref' in timeoutId) {
+        (timeoutId as NodeJS.Timeout).unref();
+    }
+    return controller;
+}
+
+async function queryOllama(model: string, payload: Record<string, unknown>): Promise<unknown> {
     try {
+        const controller = createTimeoutController(OLLAMA_TIMEOUT);
         const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
             method: 'POST',
             headers: {
@@ -27,23 +41,25 @@ async function queryOllama(model: string, payload: any): Promise<any> {
                 ...payload,
                 stream: false
             }),
-        })
+            signal: controller.signal
+        });
 
         if (!response.ok) {
-            throw new Error(`Ollama API error: ${response.status} ${response.statusText}`)
+            throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
         }
 
-        return response.json()
+        return response.json();
     } catch (error) {
-        console.error('Ollama request failed:', error)
-        throw error
+        console.error('Ollama request failed:', error);
+        throw error;
     }
 }
 
 async function generateEmbedding(text: string): Promise<number[]> {
     try {
-        console.log(`Generating embedding with Ollama model: ${EMBEDDING_MODEL}`)
+        console.log(`Generating embedding with Ollama model: ${EMBEDDING_MODEL}`);
 
+        const controller = createTimeoutController(OLLAMA_TIMEOUT);
         const response = await fetch(`${OLLAMA_BASE_URL}/api/embeddings`, {
             method: 'POST',
             headers: {
@@ -56,39 +72,41 @@ async function generateEmbedding(text: string): Promise<number[]> {
                     wait_for_model: true
                 }
             }),
-        })
+            signal: controller.signal
+        });
 
         if (!response.ok) {
-            throw new Error(`Ollama embedding error: ${response.status} ${response.statusText}`)
+            throw new Error(`Ollama embedding error: ${response.status} ${response.statusText}`);
         }
 
-        const data: OllamaEmbeddingResponse = await response.json()
-        return data.embedding
+        const data: OllamaEmbeddingResponse = await response.json();
+        return data.embedding;
     } catch (error) {
-        console.error('Error generating embedding:', error)
+        console.error('Error generating embedding:', error);
         // Fallback to mock embedding if Ollama fails
-        return generateMockEmbedding(text)
+        return generateMockEmbedding(text);
     }
 }
 
 async function generateChatResponse(systemPrompt: string, userQuestion: string): Promise<string> {
     try {
-        console.log(`Generating chat response with Ollama models: ${CHAT_MODELS.join(', ')}`)
+        console.log(`Generating chat response with Ollama models: ${CHAT_MODELS.join(', ')}`);
 
-        // Check if Ollama is running first
+        // Performance: Check if Ollama is running first with short timeout
         try {
-            await fetch(`${OLLAMA_BASE_URL}/api/version`)
+            const controller = createTimeoutController(5000);
+            await fetch(`${OLLAMA_BASE_URL}/api/version`, { signal: controller.signal });
         } catch {
-            console.log('Ollama not running, using fallback responses')
-            return generateMockResponse(systemPrompt, userQuestion)
+            console.log('Ollama not running, using fallback responses');
+            return generateMockResponse(systemPrompt, userQuestion);
         }
 
         // Try different models if primary fails
-        const models = CHAT_MODELS
+        const models = CHAT_MODELS;
 
         for (const model of models) {
             try {
-                console.log(`Trying model: ${model}`)
+                console.log(`Trying model: ${model}`);
 
                 const prompt = `You are a helpful assistant analyzing meeting content.
 
@@ -96,96 +114,110 @@ System Instructions: ${systemPrompt}
 
 User Question: ${userQuestion}
 
-Please provide a helpful, accurate response based on the meeting content. If you cannot find specific information, please say so clearly.`
+Please provide a helpful, accurate response based on the meeting content. If you cannot find specific information, please say so clearly.`;
 
+                const controller = createTimeoutController(OLLAMA_TIMEOUT);
                 const response = await queryOllama(model, {
                     prompt,
                     temperature: 0.3,
                     num_predict: 300
-                })
+                });
 
-                const result = (response as OllamaChatResponse).response || ''
+                const result = (response as OllamaChatResponse).response || '';
 
                 if (result && result.length > 10 && !result.toLowerCase().includes('error')) {
-                    console.log(`✅ Successfully got response from ${model}`)
-                    return result.trim()
+                    console.log(`✅ Successfully got response from ${model}`);
+                    return result.trim();
                 }
-            } catch (modelError: any) {
-                if (modelError.message?.includes('404')) {
-                    console.log(`❌ Model ${model} not found - you may need to run: ollama pull ${model}`)
+            } catch (modelError: unknown) {
+                const errorMessage = modelError instanceof Error ? modelError.message : String(modelError);
+                if (errorMessage.includes('AbortError') || (modelError as { name?: string }).name === 'AbortError') {
+                    console.log(`⏱️ Model ${model} timed out after ${OLLAMA_TIMEOUT}ms`);
+                } else if (errorMessage.includes('404')) {
+                    console.log(`❌ Model ${model} not found - you may need to run: ollama pull ${model}`);
                 } else {
-                    console.log(`❌ Model ${model} failed with error: ${modelError.message}`)
+                    console.log(`❌ Model ${model} failed with error: ${errorMessage}`);
                 }
-                continue
+                continue;
             }
         }
 
-        console.log('All models failed, using enhanced fallback responses')
-        return generateMockResponse(systemPrompt, userQuestion)
+        console.log('All models failed, using enhanced fallback responses');
+        return generateMockResponse(systemPrompt, userQuestion);
     } catch (error) {
-        console.error('Error generating chat response:', error)
+        console.error('Error generating chat response:', error);
         // Fallback to mock response if Ollama fails
-        return generateMockResponse(systemPrompt, userQuestion)
+        return generateMockResponse(systemPrompt, userQuestion);
     }
 }
 
 // Fallback mock functions (for when Ollama is not available)
 function generateMockEmbedding(text: string): number[] {
-    const embedding = new Array(4096).fill(0)
-    let hash = 0
+    const embedding = new Array(4096).fill(0);
+    let hash = 0;
 
     for (let i = 0; i < text.length; i++) {
-        const char = text.charCodeAt(i)
-        hash = ((hash << 5) - hash) + char
-        hash = hash & hash
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
     }
 
     for (let i = 0; i < 4096; i++) {
-        const seed = hash + i
-        embedding[i] = (Math.sin(seed) * 0.5 + 0.5)
+        const seed = hash + i;
+        embedding[i] = (Math.sin(seed) * 0.5 + 0.5);
     }
 
-    return embedding
+    return embedding;
 }
 
 function generateMockResponse(systemPrompt: string, userQuestion: string): string {
-    const combinedInput = `${systemPrompt} ${userQuestion}`.toLowerCase()
+    const combinedInput = `${systemPrompt} ${userQuestion}`.toLowerCase();
 
     // Provide more specific responses based on context
     if (combinedInput.includes('summary') || combinedInput.includes('summarize')) {
-        return "Here's a summary of the key discussion points, decisions, and outcomes from the meeting content."
+        return "Here's a summary of the key discussion points, decisions, and outcomes from the meeting content.";
     } else if (combinedInput.includes('action') || combinedInput.includes('todo') || combinedInput.includes('task')) {
-        return "Based on the meeting discussion, here are the key action items, tasks, and follow-up items that were identified."
+        return "Based on the meeting discussion, here are the key action items, tasks, and follow-up items that were identified.";
     } else if (combinedInput.includes('decision') || combinedInput.includes('decide')) {
-        return "Here are the main decisions and conclusions reached during the meeting."
+        return "Here are the main decisions and conclusions reached during the meeting.";
     } else if (combinedInput.includes('attend') || combinedInput.includes('participant')) {
-        return "The following people attended or were mentioned in this meeting."
+        return "The following people attended or were mentioned in this meeting.";
     } else if (combinedInput.includes('date') || combinedInput.includes('when') || combinedInput.includes('time')) {
-        return "This meeting took place on the date and time specified in the meeting details."
+        return "This meeting took place on the date and time specified in the meeting details.";
     } else if (combinedInput.includes('search') || combinedInput.includes('find') || combinedInput.includes('look')) {
-        return "I searched through the available meeting content and found relevant information that should help answer your question."
+        return "I searched through the available meeting content and found relevant information that should help answer your question.";
     } else if (combinedInput.includes('topic') || combinedInput.includes('discuss') || combinedInput.includes('talk')) {
-        return "The meeting covered several topics. Here's what was discussed based on the available content."
+        return "The meeting covered several topics. Here's what was discussed based on the available content.";
     } else {
-        return "I understand your question and have analyzed the available meeting content. However, I notice that Ollama (the local AI) isn't fully configured yet. Once Ollama is properly set up with working models, you'll get more detailed and accurate responses. For now, I can help you navigate and search through your meeting content."
+        return "I understand your question and have analyzed the available meeting content. However, I notice that Ollama (the local AI) isn't fully configured yet. Once Ollama is properly set up with working models, you'll get more detailed and accurate responses. For now, I can help you navigate and search through your meeting content.";
     }
 }
 
-// Main exported functions
-export async function createEmbedding(text: string) {
-    return await generateEmbedding(text)
+// Performance: Batch embedding function with concurrency control
+export async function createEmbedding(text: string): Promise<number[]> {
+    return await generateEmbedding(text);
 }
 
-export async function createManyEmbeddings(texts: string[]) {
+export async function createManyEmbeddings(texts: string[], maxConcurrency = 5): Promise<number[][]> {
     try {
-        console.log(`Creating ${texts.length} embeddings with Ollama...`)
-        return await Promise.all(texts.map(text => generateEmbedding(text)))
+        console.log(`Creating ${texts.length} embeddings with Ollama...`);
+
+        // Process embeddings in batches to avoid overwhelming the server
+        const results: number[][] = [];
+        for (let i = 0; i < texts.length; i += maxConcurrency) {
+            const batch = texts.slice(i, i + maxConcurrency);
+            const batchResults = await Promise.all(
+                batch.map(text => generateEmbedding(text).catch(() => generateMockEmbedding('fallback')))
+            );
+            results.push(...batchResults);
+        }
+        return results;
     } catch (error) {
-        console.error('Error creating embeddings:', error)
-        return texts.map(() => generateMockEmbedding('fallback'))
+        console.error('Error creating embeddings:', error);
+        return texts.map(() => generateMockEmbedding('fallback'));
     }
 }
 
-export async function chatWithAI(systemPrompt: string, userQuestion: string) {
-    return await generateChatResponse(systemPrompt, userQuestion)
+export async function chatWithAI(systemPrompt: string, userQuestion: string): Promise<string> {
+    return await generateChatResponse(systemPrompt, userQuestion);
 }

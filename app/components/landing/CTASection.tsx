@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { SignUpButton, useUser } from "@clerk/nextjs";
 import { ArrowRight, Star } from "lucide-react";
 import Link from "next/link";
-import React from "react";
 
 function CTASection() {
   const { isSignedIn } = useUser();
@@ -18,7 +17,7 @@ function CTASection() {
           </span>
         </h2>
         <p className="text-lg bg-gradient-to-r from-gray-300 to-gray-500 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(156,163,175,0.3)] mb-8">
-          Join thousands of teams already using MeetingBot to save time.
+          Join thousands of teams already using SyncUp to save time.
         </p>
         {isSignedIn ? (
           <Button
