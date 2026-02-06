@@ -3,14 +3,18 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { useAuth } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
 import { AppSidebar } from "./app-sidebar";
 
 export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { isSignedIn } = useAuth();
 
-  const showSidebar =
-    pathname !== "/" && !(pathname.startsWith("/meeting/") && !isSignedIn);
+  // Memoize the showSidebar calculation to prevent unnecessary re-renders
+  const showSidebar = useMemo(() =>
+    pathname !== "/" && !(pathname.startsWith("/meeting/") && !isSignedIn),
+    [pathname, isSignedIn]
+  );
 
   if (!showSidebar) {
     return <div className="min-h-screen">{children}</div>;
@@ -18,9 +22,9 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarProvider defaultOpen={true}>
-      <div className="flex h-screen w-full">
+      <div className="sidebar-layout">
         <AppSidebar />
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="sidebar-main overflow-auto">{children}</main>
       </div>
     </SidebarProvider>
   );

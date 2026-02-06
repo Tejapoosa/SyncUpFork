@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db";
-import { randomUUID } from "crypto";
 
 const sampleTranscripts = [
   {
@@ -114,8 +113,7 @@ async function createSamplePastMeetings() {
           email: "test@example.com",
           name: "Test User",
           calenderConnected: true,
-          googleAccessToken: "sample_token",
-          currentPlan: "premium"
+          googleAccessToken: "sample_token"
         }
       });
     }

@@ -1,6 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { AppError, ErrorMessages, createErrorResponse } from "@/lib/errors";
+import { generateRequestId } from "@/lib/request-context";
 
 const sampleTranscripts = [
   {
@@ -101,34 +104,59 @@ const sampleActionItems = [
   ]
 ];
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const requestId = generateRequestId();
+  const startTime = performance.now();
+
   try {
+    logger.info('admin_create_sample_meetings_request_received', {
+      requestId,
+      endpoint: '/api/admin/create-sample-meetings',
+      method: 'POST',
+    });
+
     const { userId } = await auth();
 
     if (!userId) {
+      logger.warn('admin_create_sample_meetings_not_authenticated', { requestId });
       return NextResponse.json(
-        { error: "Not authenticated" },
+        createErrorResponse(
+          new AppError(ErrorMessages.NOT_AUTHENTICATED),
+          requestId
+        ),
         { status: 401 }
       );
     }
 
-    // Get user from database
+    logger.info('admin_create_sample_meetings_lookup', {
+      requestId,
+      userId,
+    });
+
     const user = await prisma.user.findUnique({
       where: { clerkId: userId }
     });
 
     if (!user) {
+      logger.warn('admin_create_sample_meetings_user_not_found', {
+        requestId,
+        userId,
+      });
       return NextResponse.json(
-        { error: "User not found" },
+        createErrorResponse(
+          new AppError(ErrorMessages.USER_NOT_FOUND),
+          requestId
+        ),
         { status: 404 }
       );
     }
 
-    console.log(`Creating sample meetings for user: ${user.id}`);
+    logger.info('admin_create_sample_meetings_creating', {
+      requestId,
+      userId: user.id,
+    });
 
     const now = new Date();
-
-    // Create 3 sample past meetings from different time periods
     const meetingsData = [
       {
         title: "Weekly Team Standup - Sprint Review",
@@ -160,10 +188,8 @@ export async function POST() {
 
     for (let i = 0; i < meetingsData.length; i++) {
       const meetingData = meetingsData[i];
-
-      // Calculate past meeting times (1-2 hours duration, various days ago)
       const meetingStart = new Date(now.getTime() - (meetingData.daysAgo * 24 * 60 * 60 * 1000));
-      const meetingEnd = new Date(meetingStart.getTime() + (90 * 60 * 1000)); // 90 minutes
+      const meetingEnd = new Date(meetingStart.getTime() + (90 * 60 * 1000));
 
       const meeting = await prisma.meeting.create({
         data: {
@@ -173,24 +199,16 @@ export async function POST() {
           meetingUrl: "https://meet.google.com/sample-meeting-link",
           startTime: meetingStart,
           endTime: meetingEnd,
-
-          // Calendar integration fields
           calendarEventId: `sample_calendar_event_${i + 1}`,
           isFromCalendar: true,
-
-          // Bot fields
           botScheduled: true,
           botSent: true,
           botId: `bot_${i + 1}`,
           botJoinedAt: meetingStart,
-
-          // Meeting completion fields
           meetingEnded: true,
           transcriptReady: true,
           transcript: meetingData.transcript,
           recordingUrl: "/test-audio.mp3",
-
-          // Post-processing fields
           summary: meetingData.summary,
           actionItems: meetingData.actionItems,
           processed: true,
@@ -199,8 +217,6 @@ export async function POST() {
           emailSentAt: meetingEnd,
           ragProcessed: true,
           ragProcessedAt: meetingEnd,
-
-          // Sample attendees
           attendees: JSON.stringify([
             { email: "john.doe@company.com", name: "John Doe" },
             { email: "jane.smith@company.com", name: "Jane Smith" },
@@ -209,13 +225,15 @@ export async function POST() {
         }
       });
 
-      console.log(`Created sample meeting: ${meeting.title} (ID: ${meeting.id})`);
+      logger.info('admin_create_sample_meetings_created', {
+        requestId,
+        meetingId: meeting.id,
+        title: meeting.title,
+      });
 
-      // Create transcript chunks for RAG functionality
       if (meetingData.transcript.segments) {
         for (let j = 0; j < meetingData.transcript.segments.length; j++) {
           const segment = meetingData.transcript.segments[j];
-
           await prisma.transcriptChunk.create({
             data: {
               meetingId: meeting.id,
@@ -234,6 +252,14 @@ export async function POST() {
       });
     }
 
+    const duration = performance.now() - startTime;
+    logger.info('admin_create_sample_meetings_success', {
+      requestId,
+      userId: user.id,
+      count: createdMeetings.length,
+      duration: Math.round(duration),
+    });
+
     return NextResponse.json({
       success: true,
       message: `Successfully created ${createdMeetings.length} sample past meetings`,
@@ -241,13 +267,16 @@ export async function POST() {
     });
 
   } catch (error) {
-    console.error("Error creating sample meetings:", error);
+    const duration = performance.now() - startTime;
+    logger.error('admin_create_sample_meetings_unexpected_error', error, {
+      requestId,
+      duration: Math.round(duration),
+    });
+
+    const appError = new AppError(ErrorMessages.DATABASE_ERROR);
     return NextResponse.json(
-      {
-        error: "Failed to create sample meetings",
-        details: error instanceof Error ? error.message : "Unknown error"
-      },
-      { status: 500 }
+      createErrorResponse(appError, requestId),
+      { status: appError.statusCode }
     );
   }
 }

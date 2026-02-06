@@ -1,5 +1,5 @@
-import { useAuth } from "@clerk/nextjs"
-import { useEffect, useState } from "react"
+import { useAuth } from "@clerk/nextjs";
+import { useEffect, useState } from "react";
 
 export interface ConferenceData {
     conferenceId?: string;
@@ -66,8 +66,11 @@ export function useMeetings() {
 
     useEffect(() => {
         if (userId) {
-            fetchUpcomingEvents()
-            fetchPastMeetings()
+            // Run both API calls in parallel for faster loading
+            Promise.all([
+                fetchUpcomingEvents(),
+                fetchPastMeetings()
+            ]).catch(console.error)
         }
     }, [userId])
 
@@ -76,7 +79,15 @@ export function useMeetings() {
         setError('')
 
         try {
-            const statusResponse = await fetch('/api/user/calendar-status')
+            // Add timeout to prevent hanging
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
+
+            const statusResponse = await fetch('/api/user/calendar-status', {
+                signal: controller.signal
+            })
+
+            clearTimeout(timeoutId)
             const statusData = await statusResponse.json()
 
             if (!statusData.connected) {
@@ -119,11 +130,20 @@ export function useMeetings() {
     }
 
     const fetchPastMeetings = async () => {
-
+        console.log('Fetching past meetings...');
         setPastLoading(true)
         try {
-            const response = await fetch('/api/meetings/past')
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
+
+            const response = await fetch('/api/meetings/past', {
+                signal: controller.signal
+            })
+
+            clearTimeout(timeoutId)
             const result = await response.json()
+
+            console.log('Past meetings API response:', response.status, result);
 
             if (!response.ok) {
                 console.error('failed to fetch past meetings:', result.error)
@@ -131,11 +151,14 @@ export function useMeetings() {
             }
 
             if (result.error) {
+                console.error('API returned error:', result.error);
                 return
             }
+
+            console.log('Setting past meetings:', result.meetings);
             setPastMeetings(result.meetings as PastMeeting[])
         } catch (error) {
-            console.error('faild to fetch past meetings:', error)
+            console.error('failed to fetch past meetings:', error)
         }
         setPastLoading(false)
     }

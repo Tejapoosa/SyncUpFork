@@ -127,9 +127,26 @@ export function useMeetingDetail() {
             transcriptText = meeting.transcript
               .map(
                 (segment: any) =>
-                  `${segment.speaker}: ${segment.words
-                    .map((w: any) => w.word)
-                    .join(" ")}`
+                  segment.text
+                    ? `${segment.speaker || "Speaker"}: ${segment.text}`
+                    : `${segment.speaker || "Speaker"}: ${segment.words
+                        .map((w: any) => w.word)
+                        .join(" ")}`
+              )
+              .join("\n");
+          } else if (
+            meeting.transcript &&
+            typeof meeting.transcript === "object" &&
+            Array.isArray(meeting.transcript.segments)
+          ) {
+            transcriptText = meeting.transcript.segments
+              .map(
+                (segment: any) =>
+                  segment.text
+                    ? `${segment.speaker || "Speaker"}: ${segment.text}`
+                    : `${segment.speaker || "Speaker"}: ${segment.words
+                        .map((w: any) => w.word)
+                        .join(" ")}`
               )
               .join("\n");
           }

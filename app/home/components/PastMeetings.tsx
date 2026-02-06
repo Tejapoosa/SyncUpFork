@@ -1,9 +1,8 @@
-import React from "react";
-import { PastMeeting } from "../hooks/useMeetings";
-import { Clock, ExternalLink, Video } from "lucide-react";
-import AttendeeAvatars from "./AttendeeAvatars";
-import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
+import { format } from "date-fns";
+import { Clock, ExternalLink, Video } from "lucide-react";
+import { PastMeeting } from "../hooks/useMeetings";
+import AttendeeAvatars from "./AttendeeAvatars";
 
 interface PastMeetingsProps {
   pastMeetings: PastMeeting[];
@@ -62,6 +61,23 @@ function PastMeetings({
         <p className="text-muted-foreground">
           Your completed meetings will appear here
         </p>
+      </div>
+    );
+  }
+
+  if (!pastLoading && pastMeetings.length === 0) {
+    return (
+      <div className="bg-card rounded-lg p-8 border border-border text-center">
+        <div className="flex flex-col items-center gap-4">
+          <Video className="h-12 w-12 text-muted-foreground" />
+          <div>
+            <h3 className="text-lg font-medium text-foreground mb-2">No Past Meetings</h3>
+            <p className="text-sm text-muted-foreground max-w-md">
+              Your completed meetings will appear here. Start by scheduling a meeting or
+              connecting your calendar to see your meeting history.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }

@@ -1,14 +1,16 @@
 'use client'
 
-import React from 'react'
-import { useMeetingDetail } from './hooks/useMeetingDetail'
-import MeetingHeader from './components/MeetingHeader'
-import MeetingInfo from './components/MeetingInfo'
-import { Button } from '@/components/ui/button'
-import ActionItems from './components/action-items/ActionItems'
-import TranscriptDisplay from './components/TranscriptDisplay'
-import ChatSidebar from './components/ChatSidebar'
-import CustomAudioPlayer from './components/AudioPlayer'
+import { Button } from '@/components/ui/button';
+import dynamic from 'next/dynamic';
+import { useMeetingDetail } from './hooks/useMeetingDetail';
+
+// Lazy load heavy components
+const ActionItems = dynamic(() => import('./components/action-items/ActionItems'));
+const CustomAudioPlayer = dynamic(() => import('./components/AudioPlayer'));
+const ChatSidebar = dynamic(() => import('./components/ChatSidebar'));
+const MeetingHeader = dynamic(() => import('./components/MeetingHeader'));
+const MeetingInfo = dynamic(() => import('./components/MeetingInfo'));
+const TranscriptDisplay = dynamic(() => import('./components/TranscriptDisplay'));
 
 function MeetingDetail() {
 
@@ -34,7 +36,7 @@ function MeetingDetail() {
     } = useMeetingDetail()
 
     return (
-        <div className='min-h-screen bg-background'>
+        <div className='min-h-screen bg-background flex flex-col'>
 
             <MeetingHeader
                 title={meetingData?.title || 'Meeting'}

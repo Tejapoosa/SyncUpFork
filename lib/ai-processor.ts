@@ -4,9 +4,27 @@ export async function processMeetingTranscript(transcript: any) {
     try {
         let transcriptText = ''
 
+        const formatSegment = (item: any) => {
+            if (!item) return ''
+            const speaker = item.speaker || 'Speaker'
+            if (typeof item.text === 'string' && item.text.trim().length > 0) {
+                return `${speaker}: ${item.text.trim()}`
+            }
+            if (Array.isArray(item.words) && item.words.length > 0) {
+                return `${speaker}: ${item.words.map((w: any) => w.word).join(' ')}`
+            }
+            return ''
+        }
+
         if (Array.isArray(transcript)) {
             transcriptText = transcript
-                .map((item: any) => `${item.speaker || 'Speaker'}: ${item.words.map((w: any) => w.word).join(' ')}`)
+                .map((item: any) => formatSegment(item))
+                .filter(Boolean)
+                .join('\n')
+        } else if (transcript && typeof transcript === 'object' && Array.isArray(transcript.segments)) {
+            transcriptText = transcript.segments
+                .map((item: any) => formatSegment(item))
+                .filter(Boolean)
                 .join('\n')
         } else if (typeof transcript === 'string') {
             transcriptText = transcript

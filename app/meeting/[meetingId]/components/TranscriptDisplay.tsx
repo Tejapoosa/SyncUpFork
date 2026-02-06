@@ -9,7 +9,9 @@ interface TranscriptWord {
 interface TranscriptSegment {
   words: TranscriptWord[];
   offset: number;
-  speaker: string;
+  end?: number;
+  speaker?: string;
+  text?: string;
 }
 
 interface TranscriptDisplayProps {
@@ -31,7 +33,7 @@ export default function TranscriptDisplay({
     const endTime =
       segment.words && segment.words.length > 0
         ? segment.words[segment.words.length - 1]?.end || startTime
-        : startTime;
+        : segment.end ?? startTime;
 
     return `${formatTime(startTime)} - ${formatTime(endTime)}`;
   };

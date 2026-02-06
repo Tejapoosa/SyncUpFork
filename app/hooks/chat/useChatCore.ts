@@ -1,4 +1,3 @@
-import { useUsage } from "@/app/contexts/UsageContext";
 import { useState } from "react";
 
 export interface ChatMessage {
@@ -22,14 +21,8 @@ export function useChatCore({
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
-  const { canChat, incrementChatUsage } = useUsage();
-
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isLoading) {
-      return;
-    }
-
-    if (!canChat) {
       return;
     }
 
@@ -61,8 +54,6 @@ export function useChatCore({
       const data = await response.json();
 
       if (response.ok) {
-        await incrementChatUsage();
-
         const botMessage: ChatMessage = {
           id: messages.length + 2,
           content: data.answer || data.response,
@@ -96,10 +87,6 @@ export function useChatCore({
   };
 
   const handleSuggestionClick = (suggestion: string) => {
-    if (!canChat) {
-      return;
-    }
-
     setShowSuggestions(false);
     setChatInput(suggestion);
   };
@@ -124,6 +111,5 @@ export function useChatCore({
     handleSendMessage,
     handleSuggestionClick,
     handleInputChange,
-    canChat,
   };
 }

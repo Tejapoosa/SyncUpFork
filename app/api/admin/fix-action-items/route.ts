@@ -1,40 +1,72 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { AppError, ErrorMessages, createErrorResponse } from "@/lib/errors";
+import { generateRequestId } from "@/lib/request-context";
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const requestId = generateRequestId();
+  const startTime = performance.now();
+
   try {
+    logger.info('admin_fix_action_items_request_received', {
+      requestId,
+      endpoint: '/api/admin/fix-action-items',
+      method: 'POST',
+    });
+
     const { userId } = await auth();
 
     if (!userId) {
+      logger.warn('admin_fix_action_items_not_authenticated', { requestId });
       return NextResponse.json(
-        { error: "Not authenticated" },
+        createErrorResponse(
+          new AppError(ErrorMessages.NOT_AUTHENTICATED),
+          requestId
+        ),
         { status: 401 }
       );
     }
 
-    // Get user from database
+    logger.info('admin_fix_action_items_lookup', {
+      requestId,
+      userId,
+    });
+
     const user = await prisma.user.findUnique({
       where: { clerkId: userId }
     });
 
     if (!user) {
+      logger.warn('admin_fix_action_items_user_not_found', {
+        requestId,
+        userId,
+      });
       return NextResponse.json(
-        { error: "User not found" },
+        createErrorResponse(
+          new AppError(ErrorMessages.USER_NOT_FOUND),
+          requestId
+        ),
         { status: 404 }
       );
     }
 
-    console.log(`Fixing action items structure for user: ${user.id}`);
+    logger.info('admin_fix_action_items_scanning_meetings', {
+      requestId,
+      userId: user.id,
+    });
 
-    // Find all meetings that might have string arrays instead of object arrays for action items
     const meetingsToCheck = await prisma.meeting.findMany({
       where: {
         userId: user.id
       }
     });
 
-    console.log(`Found ${meetingsToCheck.length} meetings to check`);
+    logger.info('admin_fix_action_items_found_meetings', {
+      requestId,
+      count: meetingsToCheck.length,
+    });
 
     const fixedMeetings = [];
 
@@ -43,11 +75,13 @@ export async function POST() {
         try {
           const actionItems = meeting.actionItems;
 
-          // Check if actionItems is an array of strings (wrong format)
           if (Array.isArray(actionItems) && actionItems.length > 0 && typeof actionItems[0] === 'string') {
-            console.log(`Fixing action items for meeting: ${meeting.title}`);
+            logger.info('admin_fix_action_items_fixing_meeting', {
+              requestId,
+              meetingId: meeting.id,
+              title: meeting.title,
+            });
 
-            // Convert string array to object array with proper IDs
             const fixedActionItems = actionItems.map((text, index) => ({
               id: `${meeting.id}_action_${index + 1}`,
               text: text
@@ -66,13 +100,28 @@ export async function POST() {
               actionItemsCount: fixedActionItems.length
             });
 
-            console.log(`✅ Fixed ${fixedActionItems.length} action items for: ${meeting.title}`);
+            logger.info('admin_fix_action_items_fixed', {
+              requestId,
+              meetingId: meeting.id,
+              count: fixedActionItems.length,
+            });
           }
         } catch (error) {
-          console.error(`❌ Error fixing action items for meeting ${meeting.id}:`, error);
+          logger.error('admin_fix_action_items_meeting_error', error, {
+            requestId,
+            meetingId: meeting.id,
+          });
         }
       }
     }
+
+    const duration = performance.now() - startTime;
+    logger.info('admin_fix_action_items_success', {
+      requestId,
+      userId: user.id,
+      fixedCount: fixedMeetings.length,
+      duration: Math.round(duration),
+    });
 
     return NextResponse.json({
       success: true,
@@ -81,13 +130,16 @@ export async function POST() {
     });
 
   } catch (error) {
-    console.error("Error fixing action items:", error);
+    const duration = performance.now() - startTime;
+    logger.error('admin_fix_action_items_unexpected_error', error, {
+      requestId,
+      duration: Math.round(duration),
+    });
+
+    const appError = new AppError(ErrorMessages.DATABASE_ERROR);
     return NextResponse.json(
-      {
-        error: "Failed to fix action items",
-        details: error instanceof Error ? error.message : "Unknown error"
-      },
-      { status: 500 }
+      createErrorResponse(appError, requestId),
+      { status: appError.statusCode }
     );
   }
 }
