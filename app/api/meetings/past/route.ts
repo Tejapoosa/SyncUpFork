@@ -34,17 +34,34 @@ export async function GET(request: NextRequest) {
 
         if (!user) {
             logger.warn('meetings_past_user_not_found', { requestId, userId });
-            // Create a user not found error
-            const userNotFoundError = new AppError({
-                code: ErrorCode.NOT_AUTHENTICATED,
-                message: 'User not found in database',
-                userMessage: 'User profile not found. Please try signing out and signing in again.',
-                statusCode: 404,
-            });
-            return NextResponse.json(
-                createErrorResponse(userNotFoundError, requestId),
-                { status: 404 }
-            );
+            // Auto-create user if they don't exist (Clerk webhook may not have fired)
+            try {
+                const newUser = await prisma.user.create({
+                    data: {
+                        clerkId: userId,
+                        email: `${userId}@placeholder.com`,
+                    }
+                });
+                logger.info('meetings_past_user_auto_created', { requestId, userId, newUserId: newUser.id });
+                // Return empty meetings for newly created user
+                return NextResponse.json({
+                    meetings: [],
+                    count: 0
+                });
+            } catch (createError) {
+                logger.error('meetings_past_user_auto_create_failed', createError, { requestId, userId });
+                // Create a user not found error
+                const userNotFoundError = new AppError({
+                    code: ErrorCode.NOT_AUTHENTICATED,
+                    message: 'User not found in database',
+                    userMessage: 'User profile not found. Please try signing out and signing in again.',
+                    statusCode: 404,
+                });
+                return NextResponse.json(
+                    createErrorResponse(userNotFoundError, requestId),
+                    { status: 404 }
+                );
+            }
         }
 
         logger.info('meetings_past_lookup', {
@@ -59,7 +76,11 @@ export async function GET(request: NextRequest) {
         const pastMeetings = await prisma.meeting.findMany({
             where: {
                 userId: user.id,
-                meetingEnded: true
+                // Show meetings that have ended OR have transcripts
+                OR: [
+                    { meetingEnded: true },
+                    { transcriptReady: true }
+                ]
             },
             orderBy: {
                 endTime: 'desc'
@@ -77,7 +98,10 @@ export async function GET(request: NextRequest) {
                 attendees: true,
                 transcriptReady: true,
                 recordingUrl: true,
-                speakers: true
+                speakers: true,
+                transcript: true,
+                summary: true,
+                actionItems: true
             }
         });
 

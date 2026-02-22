@@ -27,6 +27,7 @@ function Home() {
   } = useMeetings();
 
   const router = useRouter();
+
   const handleMeetingClick = (meetingId: string) => {
     router.push(`/meeting/${meetingId}`);
   };

@@ -19,7 +19,6 @@ export type LiveTranscriberProps = {
   onSegment?: (segment: LiveTranscriberSegment) => void;
   onSpeaker?: (update: { id: number; speaker: string }) => void;
   inputStream?: MediaStream;
-  showControls?: boolean;
   showTranscript?: boolean;
   stopStreamOnStop?: boolean;
   className?: string;
@@ -28,8 +27,6 @@ export type LiveTranscriberProps = {
 const LiveTranscriber = React.forwardRef<LiveTranscriberHandle, LiveTranscriberProps>(function LiveTranscriber(props, ref) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
-  const [device, setDevice] = useState<'cpu'|'cuda'>('cpu');
-  const [model, setModel] = useState<'tiny'|'base'|'medium'|'large'>('base');
   const [transcript, setTranscript] = useState<string[]>([]);
   const [partial, setPartial] = useState<string>('');
   const mediaRef = useRef<MediaStream | null>(null);
@@ -72,9 +69,6 @@ const LiveTranscriber = React.forwardRef<LiveTranscriberHandle, LiveTranscriberP
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       console.log('ws open');
-      // Inform server of desired device/model before streaming
-      const compute_type = device === 'cuda' ? 'float16' : 'int8';
-      try { ws.send(JSON.stringify({ type: 'control', cmd: 'set', device, model, compute_type })); } catch (e) {}
       setConnected(true);
     };
     ws.onerror = (err) => {
@@ -203,62 +197,21 @@ const LiveTranscriber = React.forwardRef<LiveTranscriberHandle, LiveTranscriberP
 
   useImperativeHandle(ref, () => ({ start, stop }), [start, stop]);
 
-  if (props.showControls === false && props.showTranscript === false) {
+  if (props.showTranscript === false) {
     return null;
   }
 
   return (
     <div className={props.className ? `w-full ${props.className}` : "w-full"}>
-      {props.showControls !== false ? (
-        <div>
-          <div style={{display:'flex', gap:8, alignItems:'center'}}>
-            <label style={{display:'flex', gap:6, alignItems:'center'}}>
-              <span>Device</span>
-              <select value={device} onChange={(e) => {
-                const v = e.target.value as 'cpu'|'cuda';
-                setDevice(v);
-                // if connected, inform server immediately
-                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  const compute_type = v === 'cuda' ? 'float16' : 'int8';
-                  try { wsRef.current.send(JSON.stringify({ type: 'control', cmd: 'set', device: v, model, compute_type })); } catch (e) {}
-                }
-              }}>
-                <option value="cpu">CPU</option>
-                <option value="cuda">GPU (CUDA)</option>
-              </select>
-            </label>
-            <label style={{display:'flex', gap:6, alignItems:'center'}}>
-              <span>Model</span>
-              <select value={model} onChange={(e) => {
-                const v = e.target.value as any;
-                setModel(v);
-                if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  const compute_type = device === 'cuda' ? 'float16' : 'int8';
-                  try { wsRef.current.send(JSON.stringify({ type: 'control', cmd: 'set', device, model: v, compute_type })); } catch (e) {}
-                }
-              }}>
-                <option value="tiny">tiny</option>
-                <option value="base">base</option>
-                <option value="medium">medium</option>
-                <option value="large">large</option>
-              </select>
-            </label>
-            <button onClick={start} disabled={connected}>Start</button>
-            <button onClick={stop} disabled={!connected}>Stop</button>
-          </div>
+      <div style={{marginTop:12}}>
+        <strong>Live Transcript</strong>
+        <div style={{whiteSpace:'pre-wrap', marginTop:8}}>
+            {transcript.map((t, i) => (
+              <div key={i}>{t}</div>
+            ))}
+            {partial ? <div style={{color: '#666'}}>{partial}</div> : null}
         </div>
-      ) : null}
-      {props.showTranscript === false ? null : (
-        <div style={{marginTop:12}}>
-          <strong>Live Transcript</strong>
-          <div style={{whiteSpace:'pre-wrap', marginTop:8}}>
-              {transcript.map((t, i) => (
-                <div key={i}>{t}</div>
-              ))}
-              {partial ? <div style={{color: '#666'}}>{partial}</div> : null}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 });

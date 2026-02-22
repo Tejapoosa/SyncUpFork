@@ -1,10 +1,11 @@
+import { processMeetingTranscript } from "@/lib/ai-processor";
 import { prisma } from "@/lib/db";
+import { AppError, ErrorMessages, createErrorResponse } from "@/lib/errors";
+import { logger } from "@/lib/logger";
+import { processTranscript as processRagTranscript } from "@/lib/rag";
+import { generateRequestId } from "@/lib/request-context";
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { logger } from "@/lib/logger";
-import { AppError, ErrorMessages, createErrorResponse } from "@/lib/errors";
-import { generateRequestId } from "@/lib/request-context";
-import { processMeetingTranscript } from "@/lib/ai-processor";
 
 type TranscriptSegment = {
   id?: number;
@@ -29,16 +30,23 @@ export async function POST(
     });
 
     const { userId } = await auth();
+    const { meetingId } = params;
 
+    // Allow development mode - skip auth check if no user (fallback for dev)
     if (!userId) {
-      logger.warn("meeting_transcript_not_authenticated", { requestId });
-      return NextResponse.json(
-        createErrorResponse(new AppError(ErrorMessages.NOT_AUTHENTICATED), requestId),
-        { status: 401 }
-      );
+      // Check if this is a development environment
+      if (process.env.NODE_ENV === 'development') {
+        logger.warn("meeting_transcript_dev_mode_bypassing_auth", { requestId, meetingId });
+        // Continue without auth in dev mode
+      } else {
+        logger.warn("meeting_transcript_not_authenticated", { requestId });
+        return NextResponse.json(
+          createErrorResponse(new AppError(ErrorMessages.NOT_AUTHENTICATED), requestId),
+          { status: 401 }
+        );
+      }
     }
 
-    const { meetingId } = params;
     const body = await request.json().catch(() => null);
 
     if (!body || !Array.isArray(body.segments)) {
@@ -75,7 +83,7 @@ export async function POST(
     logger.info("meeting_transcript_lookup", {
       requestId,
       meetingId,
-      userId,
+      userId: userId || 'dev-mode',
       segmentCount: segments.length,
     });
 
@@ -92,11 +100,13 @@ export async function POST(
       );
     }
 
-    if (meeting.user?.clerkId !== userId) {
+    // Authorization check - allow in dev mode without userId
+    const isDevMode = !userId && process.env.NODE_ENV === 'development';
+    if (!isDevMode && meeting.user?.clerkId !== userId) {
       logger.warn("meeting_transcript_unauthorized", {
         requestId,
         meetingId,
-        userId,
+        userId: userId || 'undefined',
         ownerId: meeting.user?.clerkId,
       });
       return NextResponse.json(
@@ -125,21 +135,36 @@ export async function POST(
     const updated = await prisma.meeting.update({
       where: { id: meetingId },
       data: {
-        transcript: transcriptPayload,
+        transcript: transcriptPayload as any,
         transcriptReady: true,
         meetingEnded: true,
         summary: summaryResult?.summary || meeting.summary,
-        actionItems: summaryResult?.actionItems || meeting.actionItems,
+        actionItems: (summaryResult?.actionItems || meeting.actionItems) as any,
         processed: summarize ? true : meeting.processed,
         processedAt: summarize ? new Date() : meeting.processedAt,
       },
     });
 
+    // Process transcript into RAG for future chat queries
+    try {
+      const fullTranscript = segments.map(s => s.text).join(' ');
+      const ragUserId = meeting.userId || userId || 'dev-user';
+      await processRagTranscript(meetingId, ragUserId, fullTranscript, meeting.title || undefined);
+      logger.info("meeting_transcript_rag_processed", { requestId, meetingId });
+    } catch (ragError) {
+      // Don't fail the request if RAG processing fails
+      logger.error("meeting_transcript_rag_failed", {
+        requestId,
+        meetingId,
+        error: ragError instanceof Error ? ragError.message : 'Unknown error'
+      });
+    }
+
     const duration = performance.now() - startTime;
     logger.info("meeting_transcript_update_success", {
       requestId,
       meetingId,
-      userId,
+      userId: userId || 'dev-mode',
       duration: Math.round(duration),
     });
 

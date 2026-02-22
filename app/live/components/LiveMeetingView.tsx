@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarEvent } from "@/app/home/hooks/useMeetings";
-import { Button } from "@/components/ui/button";
+import {
+  LiveSegment,
+  loadTranscript,
+  saveTranscript,
+} from "@/app/live/lib/transcriptStorage";
 import LiveTranscriber, { LiveTranscriberHandle } from "@/components/LiveTranscriber";
-import { format } from "date-fns";
-import { Mic, Video } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -15,11 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  LiveSegment,
-  loadTranscript,
-  saveTranscript,
-} from "@/app/live/lib/transcriptStorage";
+import { format } from "date-fns";
+import { Mic, Video } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface LiveMeetingViewProps {
   upcomingEvents: CalendarEvent[];
@@ -27,6 +27,7 @@ interface LiveMeetingViewProps {
   loading: boolean;
   error: string;
   onRefreshCalendar?: () => void;
+  onMeetingSaved?: () => void;
 }
 
 type MeetingOption = {
@@ -182,6 +183,7 @@ function LiveMeetingView({
   loading,
   error,
   onRefreshCalendar,
+  onMeetingSaved,
 }: LiveMeetingViewProps) {
   const transcriberRef = useRef<LiveTranscriberHandle | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -224,13 +226,12 @@ function LiveMeetingView({
   const [finalActionItems, setFinalActionItems] = useState<string[]>([]);
   const [finalSummaryStatus, setFinalSummaryStatus] = useState("");
 
-  const currentTopic = useMemo(() => getCurrentTopic(segments, partial), [segments, partial]);
   const displayTopic = useMemo(() => {
     const topic = liveSummary?.topic?.trim();
-    if (topic) return topic;
-    if (currentTopic) return currentTopic;
+    if (topic && topic.length > 0) return topic;
+    // Only show "Listening..." instead of using unreliable frequency-based topic
     return "Listening...";
-  }, [liveSummary, currentTopic]);
+  }, [liveSummary]);
 
   useEffect(() => {
     latestSegmentsRef.current = segments;
@@ -281,16 +282,33 @@ function LiveMeetingView({
     if (!selectedMeetingId) {
       return;
     }
-    const stored = loadTranscript(selectedMeetingId);
-    if (stored) {
-      setSegments(stored.segments || []);
-      setStartedAt(stored.startedAt || null);
-      if (stored.meetingTitle && stored.meetingTitle !== selectedMeetingTitle) {
-        setSelectedMeetingTitle(stored.meetingTitle);
-      }
-    } else {
+    // Always clear transcript for new local sessions
+    if (selectedMeetingId === 'local') {
       setSegments([]);
+      setPartial("");
       setStartedAt(null);
+      // Clear localStorage for this session
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('transcript_')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+    } else {
+      // Load transcript for saved meetings from database
+      const stored = loadTranscript(selectedMeetingId);
+      if (stored) {
+        setSegments(stored.segments || []);
+        setStartedAt(stored.startedAt || null);
+        if (stored.meetingTitle && stored.meetingTitle !== selectedMeetingTitle) {
+          setSelectedMeetingTitle(stored.meetingTitle);
+        }
+      } else {
+        setSegments([]);
+        setStartedAt(null);
+      }
     }
     setPartial("");
     setStorageWarning("");
@@ -424,17 +442,23 @@ function LiveMeetingView({
     if (summaryIntervalRef.current) {
       clearInterval(summaryIntervalRef.current);
     }
+
+    // Update summary every 30 seconds for more responsive topic detection
     summaryIntervalRef.current = setInterval(() => {
       runSummary();
-    }, 60000);
+    }, 30000);
 
-    runSummary();
+    // Run initial summary after 10 seconds to get topic quickly
+    const initialTimeout = setTimeout(() => {
+      runSummary();
+    }, 10000);
 
     return () => {
       if (summaryIntervalRef.current) {
         clearInterval(summaryIntervalRef.current);
         summaryIntervalRef.current = null;
       }
+      clearTimeout(initialTimeout);
     };
   }, [transcribing, runSummary]);
 
@@ -487,12 +511,17 @@ function LiveMeetingView({
   }, []);
 
   const stopTranscription = async () => {
-    if (!transcribing && segments.length === 0) {
+    // Don't proceed if there's no content to save
+    if (segments.length === 0 && latestSegmentsRef.current.length === 0) {
       return;
     }
-    try {
-      transcriberRef.current?.stop();
-    } catch {}
+
+    // Stop the transcriber if it's running
+    if (transcribing) {
+      try {
+        transcriberRef.current?.stop();
+      } catch {}
+    }
     setTranscribing(false);
     if (autosaveRef.current) {
       clearInterval(autosaveRef.current);
@@ -649,12 +678,17 @@ function LiveMeetingView({
         setFinalActionItems(items);
         setFinalSummaryStatus("");
       }
+      // Refresh past meetings list after successful save
+      if (onMeetingSaved) {
+        onMeetingSaved();
+      }
     } catch {
       setSaveStatus("Failed to save transcript to meeting history.");
     }
   };
 
   const stopAll = async () => {
+    // Always attempt to save the meeting if there's content
     await stopTranscription();
     cleanupStreams();
     setSharing(false);
@@ -971,7 +1005,7 @@ function LiveMeetingView({
           )}
         </div>
 
-        <div className="bg-card border border-border rounded-lg p-4 h-80 w-full flex flex-col">
+        <div className="bg-card border border-border rounded-lg p-4 h-80 w-full flex flex-col" style={{ minWidth: 0 }}>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div className="text-sm font-semibold text-foreground">Live Transcript</div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -981,7 +1015,8 @@ function LiveMeetingView({
               </span>
             </div>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto space-y-3 pr-1">
+          <div className="flex-1 min-h-0 overflow-auto pr-1" style={{ minWidth: 0 }}>
+            <div className="space-y-3">
             <div className="rounded-md border border-border/60 bg-muted/30 p-3">
               <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground mb-2">
                 <span className="uppercase tracking-wide">Live Summary</span>
@@ -1046,30 +1081,82 @@ function LiveMeetingView({
                 ) : null}
               </div>
             )}
-            <div className="w-full">
+            <div className="w-full max-w-full" style={{ width: '100%' }}>
               {segments.length > 0 || partial ? (
-                <div className="space-y-2 text-sm text-foreground">
-                  {segments.map((segment, index) => (
-                    <div
-                      key={
-                        segment.sessionId
-                          ? `segment-${segment.sessionId}-${segment.id ?? "x"}-${index}`
-                          : segment.id
-                            ? `segment-${segment.id}-${segment.offset}-${index}`
-                            : `${segment.offset}-${index}`
+                <div className="w-full max-w-full" style={{ width: '100%' }}>
+                  {(() => {
+                    // Group consecutive segments by speaker, keeping timestamps
+                    const grouped: {
+                      speaker: string;
+                      segments: { text: string; timestamp: string; key: string }[]
+                    }[] = [];
+
+                    segments.forEach((segment, index) => {
+                      const lastGroup = grouped[grouped.length - 1];
+                      const minutes = Math.floor(segment.offset / 60);
+                      const seconds = Math.floor(segment.offset % 60);
+                      const timestamp = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+
+                      const key = segment.sessionId
+                        ? `segment-${segment.sessionId}-${segment.id ?? "x"}-${index}`
+                        : segment.id
+                          ? `segment-${segment.id}-${segment.offset}-${index}`
+                          : `${segment.offset}-${index}`;
+
+                      if (lastGroup && lastGroup.speaker === segment.speaker) {
+                        // Same speaker - add to existing group
+                        lastGroup.segments.push({ text: segment.text, timestamp, key });
+                      } else {
+                        // Different speaker - create new group
+                        grouped.push({
+                          speaker: segment.speaker,
+                          segments: [{ text: segment.text, timestamp, key }]
+                        });
                       }
-                      className="flex gap-2"
-                    >
-                      <span className="text-xs text-muted-foreground whitespace-nowrap mt-0.5">
-                        {segment.speaker}
-                      </span>
-                      <span className="flex-1 whitespace-pre-wrap break-words">
-                        {segment.text}
-                      </span>
-                    </div>
-                  ))}
+                    });
+
+                    return grouped.map((group, groupIndex) => (
+                      <div
+                        key={`group-${groupIndex}`}
+                        className="w-full max-w-full"
+                        style={{ marginTop: groupIndex === 0 ? '0' : '12px', width: '100%' }}
+                      >
+                        <div className="text-xs font-semibold text-muted-foreground mb-1">
+                          {group.speaker}
+                        </div>
+                        <div className="space-y-0.5">
+                          {group.segments.map((seg) => (
+                            <div
+                              key={seg.key}
+                              className="text-sm text-foreground leading-relaxed w-full max-w-full"
+                              style={{
+                                width: '100%',
+                                maxWidth: '100%',
+                                wordBreak: 'break-word',
+                                overflowWrap: 'break-word',
+                                display: 'block'
+                              }}
+                            >
+                              <span className="text-muted-foreground text-xs mr-2">{seg.timestamp}</span>
+                              <span>: {seg.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()}
                   {partial ? (
-                    <div className="text-muted-foreground whitespace-pre-wrap break-words">
+                    <div
+                      className="text-sm text-muted-foreground leading-relaxed w-full max-w-full mt-1"
+                      style={{
+                        width: '100%',
+                        maxWidth: '100%',
+                        wordBreak: 'break-word',
+                        overflowWrap: 'break-word',
+                        whiteSpace: 'pre-wrap',
+                        display: 'block'
+                      }}
+                    >
                       {partial}
                     </div>
                   ) : null}
@@ -1089,6 +1176,7 @@ function LiveMeetingView({
                 onSpeaker={handleSpeakerUpdate}
                 onPartial={(text) => setPartial(text)}
               />
+            </div>
             </div>
             {storageWarning && (
               <div className="text-xs text-yellow-500/90">{storageWarning}</div>

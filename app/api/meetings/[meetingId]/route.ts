@@ -23,10 +23,22 @@ export async function GET(
 
         const { meetingId } = await params;
 
+        // Allow development mode - skip auth check if no user
+        if (!clerkUserId && process.env.NODE_ENV !== 'development') {
+            logger.warn('meeting_get_not_authenticated', { requestId, meetingId });
+            return NextResponse.json(
+                createErrorResponse(
+                    new AppError(ErrorMessages.NOT_AUTHENTICATED),
+                    requestId
+                ),
+                { status: 401 }
+            );
+        }
+
         logger.info('meeting_get_lookup', {
             requestId,
             meetingId,
-            userId: clerkUserId,
+            userId: clerkUserId || 'dev-mode',
         });
 
         const meeting = await prisma.meeting.findUnique({

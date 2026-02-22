@@ -32,15 +32,23 @@ export async function POST(request: NextRequest) {
         });
 
         const { userId } = await auth();
+
+        // Allow development mode - skip auth check if no user (fallback for dev)
         if (!userId) {
-            logger.warn('chat_meeting_not_authenticated', { requestId });
-            return NextResponse.json(
-                createErrorResponse(
-                    new AppError(ErrorMessages.NOT_AUTHENTICATED),
-                    requestId
-                ),
-                { status: 401 }
-            );
+            // Check if this is a development environment
+            if (process.env.NODE_ENV === 'development') {
+                logger.warn("chat_meeting_dev_mode_bypassing_auth", { requestId });
+                // Continue without auth in dev mode
+            } else {
+                logger.warn('chat_meeting_not_authenticated', { requestId });
+                return NextResponse.json(
+                    createErrorResponse(
+                        new AppError(ErrorMessages.NOT_AUTHENTICATED),
+                        requestId
+                    ),
+                    { status: 401 }
+                );
+            }
         }
 
         const body = await request.json();
@@ -61,12 +69,15 @@ export async function POST(request: NextRequest) {
 
         const { meetingId, question } = validation.data;
 
+        // Use fallback userId for dev mode
+        const targetUserId = userId || 'dev-user';
+
         try {
-            checkRateLimit(userId, RateLimits.CHAT_MESSAGES);
+            checkRateLimit(targetUserId, RateLimits.CHAT_MESSAGES);
         } catch (error) {
             logger.warn('chat_meeting_rate_limit_exceeded', {
                 requestId,
-                userId,
+                userId: targetUserId,
             });
             const appError = error instanceof AppError ? error : new AppError(ErrorMessages.RATE_LIMIT_EXCEEDED(50, '24h'));
             return NextResponse.json(
@@ -77,17 +88,17 @@ export async function POST(request: NextRequest) {
 
         logger.info('chat_meeting_processing', {
             requestId,
-            userId,
+            userId: targetUserId,
             meetingId,
             questionLength: question.length,
         });
 
-        const response = await chatWithMeeting(userId, meetingId, question);
+        const response = await chatWithMeeting(targetUserId, meetingId, question);
 
         const duration = performance.now() - startTime;
         logger.info('chat_meeting_response_sent', {
             requestId,
-            userId,
+            userId: targetUserId,
             duration: Math.round(duration),
             answerLength: response.answer?.length || 0,
         });
@@ -127,3 +138,4 @@ export async function POST(request: NextRequest) {
         return res;
     }
 }
+
