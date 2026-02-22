@@ -16,6 +16,7 @@ function LiveMeetingPage() {
     loading,
     error,
     refreshCalendar,
+    fetchPastMeetings,
   } = useMeetings();
 
   return (
@@ -25,6 +26,7 @@ function LiveMeetingPage() {
       loading={loading}
       error={error}
       onRefreshCalendar={refreshCalendar}
+      onMeetingSaved={fetchPastMeetings}
     />
   );
 }

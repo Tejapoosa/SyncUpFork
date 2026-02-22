@@ -63,7 +63,34 @@ export async function processMeetingTranscript(transcript: any) {
             throw new Error('No response from local AI')
         }
 
-        const parsed = JSON.parse(response)
+        // Try to parse as JSON, handle non-JSON responses
+        let parsed;
+        try {
+            parsed = JSON.parse(response)
+        } catch (parseError) {
+            // If response is not valid JSON, try to extract summary and action items
+            console.warn('AI response was not JSON, attempting to parse text response')
+
+            // Try to find JSON in the response if it's wrapped in text
+            const jsonMatch = response.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                try {
+                    parsed = JSON.parse(jsonMatch[0]);
+                } catch {
+                    // Still not valid JSON, create a summary from the text
+                    parsed = {
+                        summary: response.substring(0, 500),
+                        actionItems: []
+                    };
+                }
+            } else {
+                // Use the response as the summary directly
+                parsed = {
+                    summary: response.substring(0, 500),
+                    actionItems: []
+                };
+            }
+        }
 
         const actionItems = Array.isArray(parsed.actionItems)
             ? parsed.actionItems.map((text: string, index: number) => ({

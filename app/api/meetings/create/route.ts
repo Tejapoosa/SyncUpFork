@@ -49,7 +49,34 @@ export async function POST(request: NextRequest) {
 
         if (!user) {
             logger.warn('meeting_create_user_not_found', { requestId, userId });
-            return NextResponse.json(
+            // Auto-create user if they don't exist ( Clerk webhook may not have fired)
+            try {
+                const newUser = await prisma.user.create({
+                    data: {
+                        clerkId: userId,
+                        email: `${userId}@placeholder.com`,
+                    }
+                });
+                logger.info('meeting_create_user_auto_created', { requestId, userId, newUserId: newUser.id });
+            } catch (createError) {
+                logger.error('meeting_create_user_auto_create_failed', createError, { requestId, userId });
+                return NextResponse.json(
+                    createErrorResponse(
+                        new AppError(ErrorMessages.USER_NOT_FOUND),
+                        requestId
+                    ),
+                    { status: 404 }
+                );
+            }
+        }
+
+        // Re-fetch user after potential creation
+        const finalUser = await prisma.user.findUnique({
+            where: { clerkId: userId }
+        });
+
+        if (!finalUser) {
+             return NextResponse.json(
                 createErrorResponse(
                     new AppError(ErrorMessages.USER_NOT_FOUND),
                     requestId
@@ -59,7 +86,7 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-            checkRateLimit(userId, RateLimits.CREATE_MEETING);
+            checkRateLimit(finalUser.id, RateLimits.CREATE_MEETING);
         } catch (error) {
             logger.warn('meeting_create_rate_limit_exceeded', { requestId, userId });
             const appError = error instanceof AppError ? error : new AppError(ErrorMessages.RATE_LIMIT_EXCEEDED(100, '24h'));
@@ -104,7 +131,7 @@ export async function POST(request: NextRequest) {
 
         const meeting = await prisma.meeting.create({
             data: {
-                userId: user.id,
+                userId: finalUser.id,
                 title,
                 description,
                 meetingUrl,

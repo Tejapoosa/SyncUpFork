@@ -34,9 +34,6 @@ function UpcomingMeetings({
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-foreground">Upcoming</h2>
-        <span className="text-sm text-muted-foreground">
-          ({upcomingEvents.length})
-        </span>
       </div>
 
       {error && (
@@ -80,7 +77,7 @@ function UpcomingMeetings({
             No upcoming meetings
           </h3>
           <p className="text-muted-foreground text-xs ">
-            Your caledar is clear!
+            Your calendar is clear!
           </p>
         </div>
       ) : (

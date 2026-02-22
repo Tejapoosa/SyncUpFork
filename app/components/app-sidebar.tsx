@@ -10,7 +10,7 @@ import {
     SidebarMenuItem,
     SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Bot, Clock, Layers3, Settings, Video } from "lucide-react";
+import { Bot, Clock, Layers3, Mail, Settings, Video } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -24,6 +24,11 @@ const items = [
     title: "Live Meeting",
     url: "/live",
     icon: Video,
+  },
+  {
+    title: "Email Summaries",
+    url: "/emails",
+    icon: Mail,
   },
   {
     title: "Integrations",

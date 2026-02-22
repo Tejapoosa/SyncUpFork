@@ -8,11 +8,12 @@ datasource db {
 }
 
 model User {
-  id       String    @id
+  id       String    @id @default(cuid())
   clerkId  String    @unique
   email    String?
   name     String?
   meetings Meeting[]
+  emails   Email[]
 
   botName     String? @default("Meeting Bot")
   botImageUrl String?
@@ -22,11 +23,20 @@ model User {
   googleTokenExpiry  DateTime?
   calenderConnected  Boolean   @default(false)
 
+  // Gmail connection for email summarization
+  gmailConnected     Boolean   @default(false)
+  gmailAccessToken   String?
+  gmailRefreshToken  String?
+  gmailTokenExpiry   DateTime?
+
   slackUserId          String?
   slackTeamId          String?
   slackConnected       Boolean @default(false)
   preferredChannelId   String?
   preferredChannelName String?
+
+  // Email filter domains (e.g., @student.mes.ac.in)
+  emailFilterDomains String?  @default("student.mes.ac.in")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -114,4 +124,31 @@ model TranscriptChunk {
   vectorId    String?
   createdAt   DateTime @default(now())
   meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+// Gmail Email Model
+model Email {
+  id              String   @id @default(cuid())
+  gmailId         String   @unique
+  threadId        String?
+  subject         String
+  fromName        String?
+  fromEmail       String
+  toEmail         String
+  snippet         String   @db.Text
+  body            String?  @db.Text
+  bodyHtml        String?  @db.Text
+  receivedAt      DateTime
+  summarizedAt    DateTime?
+  summary         String?  @db.Text
+  actionItems     Json?
+  domain          String
+  isRead          Boolean  @default(false)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, receivedAt])
+  @@index([domain, userId])
 }
