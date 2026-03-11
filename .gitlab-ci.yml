@@ -89,7 +89,7 @@ test:
     - apk add --no-cache libc6-compat python3 make g++
     - npm ci --legacy-peer-deps
   script:
-    - npm run test -- --coverage
+    - npx jest --coverage
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
   artifacts:
     reports:
@@ -104,6 +104,7 @@ test:
     name: test
   variables:
     DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/synup_test?schema=public"
+    POSTGRES_PASSWORD: "postgres"
     # Test environment variables (use CI_SECRET_* for actual secrets)
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_dummy"
     CLERK_SECRET_KEY: "sk_test_dummy"
