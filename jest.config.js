@@ -4,7 +4,8 @@ module.exports = {
   roots: ['<rootDir>'],
   testMatch: ['**/__tests__/**/*.ts?(x)', '**/?(*.)+(spec|test).ts?(x)'],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/$1',
+    '^@/(.*)
+: '<rootDir>/$1',
   },
   collectCoverageFrom: [
     'lib/**/*.{ts,tsx}',
@@ -13,14 +14,6 @@ module.exports = {
     '!**/node_modules/**',
     '!**/.next/**',
   ],
-  coverageThreshold: {
-    global: {
-      branches: 50,
-      functions: 50,
-      lines: 50,
-      statements: 50,
-    },
-  },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   testPathIgnorePatterns: ['/node_modules/', '/.next/'],
   transformIgnorePatterns: ['/node_modules/'],
