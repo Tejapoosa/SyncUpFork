@@ -90,7 +90,6 @@ test:
     - npm ci --legacy-peer-deps
   script:
     - npx jest --coverage
-  allow_failure: true  # Tests have configuration issues
   coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
   artifacts:
     reports:
