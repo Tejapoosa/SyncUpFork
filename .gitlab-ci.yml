@@ -91,10 +91,6 @@ test:
   script:
     - npx jest --passWithNoTests --forceExit
   allow_failure: true  # Tests have many TypeScript errors - allow failure for now
-      - coverage/
-    expire_in: 7 days
-  environment:
-    name: test
   variables:
     DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/synup_test?schema=public"
     POSTGRES_PASSWORD: "postgres"
