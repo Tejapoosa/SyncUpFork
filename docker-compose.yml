@@ -2,9 +2,9 @@ version: '3.8'
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # REPLACE 'registry.gitlab.com/YOUR-GROUP/YOUR-PROJECT' with your actual GitLab registry path
+    # You can find this in GitLab: Settings → Packages & Registries → Container Registry
+    image: registry.gitlab.com/twsdevops8955711/sync-up-fork:latest
     ports:
       - "3000:3000"
     env_file:
