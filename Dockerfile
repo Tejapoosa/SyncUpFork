@@ -30,6 +30,7 @@ RUN npx prisma generate
 
 # Set environment variables for build
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=dummy_key_for_build
 
 # Build the application
 RUN npm run build
