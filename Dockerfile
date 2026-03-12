@@ -25,14 +25,16 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Copy .env file (explicitly - it's in .dockerignore but needed for build)
-COPY .env .
-
 # Generate Prisma client again in builder stage
 RUN npx prisma generate
 
+# Build arguments for required environment variables
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_CLERK_SIGNING_SECRET
+
 # Set environment variables for build
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 
 # Build the application
 RUN npm run build
