@@ -152,7 +152,7 @@ build:docker:
   script:
     - docker build --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
     - docker build --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY -t $CI_REGISTRY_IMAGE:latest .
-    - docker push $CI_COMISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
     - docker push $CI_REGISTRY_IMAGE:latest
   only:
     - main
