@@ -52,7 +52,6 @@ install:
       - node_modules/
       - .next/
     expire_in: 1 hour
-  allow_failure: true  # Skip to speed up pipeline iteration
 
 # Lint the codebase
 lint:
@@ -64,7 +63,6 @@ lint:
     - npm ci --legacy-peer-deps
   script:
     - npm run lint
-  allow_failure: true  # Skip to speed up pipeline iteration
 
 # TypeScript type checking
 typecheck:
@@ -76,7 +74,6 @@ typecheck:
     - npm ci --legacy-peer-deps
   script:
     - npx tsc --noEmit
-  allow_failure: true  # Skip to speed up pipeline iteration
 
 # Run tests
 test:
@@ -91,7 +88,6 @@ test:
     - npm ci --legacy-peer-deps
   script:
     - npx jest --passWithNoTests --forceExit
-  allow_failure: true  # Skip to speed up pipeline iteration
   variables:
     DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/synup_test?schema=public"
     POSTGRES_PASSWORD: "postgres"
@@ -127,7 +123,6 @@ build:
     - npm ci --legacy-peer-deps
   script:
     - npm run build
-  allow_failure: true  # Skip to focus on build:docker
   artifacts:
     paths:
       - .next/
@@ -182,7 +177,7 @@ deploy:staging:
   only:
     - develop
 
-# Deploy to production (customize for your infrastructure)
+# Deploy to production (automatic on main branch push)
 deploy:production:
   stage: deploy
   needs:
@@ -204,7 +199,6 @@ deploy:production:
   environment:
     name: production
     url: https://syncup.app
-  when: manual
   only:
     - main
 
